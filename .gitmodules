@@ -1,0 +1,3 @@
+[submodule "afl-ptmin"]
+	path = afl-ptmin
+	url = git@gist.github.com:4305328f069f7a951ccc.git
