@@ -1,0 +1,345 @@
+#!/bin/bash
+
+cecho() {
+    RED="\033[0;31m"
+    GREEN="\033[0;32m"
+    YELLOW="\033[1;33m"
+    # ... ADD MORE COLORS
+    NC='\033[0m' # No Color
+    printf "${!1}${2}${NC}"
+}
+
+if [ ! -d "ramdisk" ] && [ -e "ramdisk" ]; then
+  cecho RED "[!] There is a file called \"ramdisk\" here. Please delete or rename.\n"
+  exit 2
+fi
+
+if [ -e "crashes" ]; then
+  cecho RED "[!] There is a file or folder called \"crashes\" here. Please delete or rename.\n"
+  exit 2
+fi
+
+if [ -e "backup" ]; then
+  cecho RED "[!] There is a file or folder called \"backup\" here. Please delete or rename.\n"
+  exit 2
+fi
+
+if [ -z "${TMUX+x}" ]; then
+  cecho YELLOW "Not a tmux session. Respawning into a tmux session now "
+  tmux new-session "$0; read"
+  exit 0
+fi
+
+##########
+
+ramdiskMounted=0
+abort=0
+
+finish() {
+  echo "[*] Cleaning up ..."
+  if [[ $ramdiskMounted == 1 ]]; then
+    if [[ "$PWD" == $ramdiskPath ]]; then
+      # leave the ramdisk, otherwise we can't unmount it
+      cd ..
+    fi
+    if [[ $UID != 0 ]]; then
+      cecho YELLOW "[!] We need to be root to use \"umount\"\n"
+      sudo umount "$ramdiskPath"
+    else
+      umount "$ramdiskPath"
+    fi
+  fi
+  echo "Press [Enter] to return to your shell"
+}
+trap finish EXIT INT
+
+##########
+
+waitTmux() {
+  until [ -f tmux-continue ]; do
+    sleep 1;
+  done
+  rm tmux-continue
+}
+
+fuzzOneCycle() {
+
+  echo "[*] Starting fuzzers ..."
+
+  slaves=$(( $cores - 1 ))
+  if (( $cycle == 1 )); then
+    inputdir=testcases
+  else
+    inputdir=-
+  fi
+  
+  # clean up the master's stats file
+  if [ -e "findings/${job}M/fuzzer_stats" ]; then
+    rm "findings/${job}M/fuzzer_stats"
+  fi
+
+  # bring up the master fuzzer on a new background terminal
+  screen -S "fuzzer-${job}M" -d -m afl-fuzz -i $inputdir -o findings -M "${job}M" $aflparams $command
+  echo "[*] Master is up"
+  # bring up the slave fuzzers
+  for ((n=0;n<$slaves;n++)); do
+    screen -S "fuzzer-${job}S${n}" -d -m afl-fuzz -i $inputdir -o findings -S "${job}S${n}" $aflparams $command
+    echo -n .
+  done
+  echo
+  echo "[*] Slaves are up"
+
+  echo "[*] Launching AFL monitor on the right side"
+  tmux split-window -hd "watch -n5 afl-whatsup findings"
+
+  ##########
+  
+  echo "[*] Waiting for Master fuzzer stats to become alive ..."
+
+  # wait until fuzzer_stats file of master is present
+  ctr=0
+  while [ ! -e "findings/${job}M/fuzzer_stats" ] && (( $ctr < 6 )); do
+    echo -n "."
+    sleep 10
+    ctr=$(( $ctr + 1 ))
+  done
+  echo
+  if (( $ctr >= 6 )); then
+    cecho RED "[!] Master did not come up properly, aborting\n"
+    abort=1
+  else
+    echo "[*] Waiting for Master fuzzer to complete one cycle ..."
+    # wait until fuzzer_stats of the master show >= 1 completed cycle
+    while [[ $(awk -F ': ' '/cycles_done/{ printf $2 }' "findings/${job}M/fuzzer_stats") == 0 ]]; do
+      sleep 10
+    done
+    echo "[*] Cycle completed."
+  fi
+
+  echo "[*] Terminating fuzzers ..."
+  # inject Ctrl-C in each background terminal
+  for ((n=0;n<$slaves;n++)); do
+    screen -S "fuzzer-${job}S${n}" -X stuff ^C
+    echo -n .
+  done
+  screen -S "fuzzer-${job}M" -X stuff ^C
+  echo -e ".\nFuzzers shut down"
+
+  # close AFL monitor
+  tmux kill-pane -t1
+
+  ##########
+
+  echo "[*] Backing up ..."
+  cd ..
+  cp -r ramdisk/findings backup/findings-$cycle
+  cd ramdisk
+  echo "[*] Backup completed"
+
+}
+
+minimizeQueues() {
+
+  echo "[*] Collecting queues ..."
+  # need find here because wildcards don't work on this many files
+  find findings/*/queue -name "id:*" | xargs -I {} cp -n {} queue-all/
+  echo "[*] Flushing per-fuzzer queues ..."
+  rm -r findings/*/queue
+  ls queue-all
+
+  ##########
+
+  echo "[*] Deduplicating queue (first pass) ..."
+  tmux split-window -hd "afl-cmin -i queue-all/ -o queue-cmin -- $command; touch tmux-continue"
+  waitTmux
+  #ls queue-cmin
+  echo "[*] Minimizing test cases ..."
+  tmux split-window -hd "afl-ptmin $cores queue-cmin queue-tmin \"$command\"; touch tmux-continue"
+  waitTmux
+  #ls queue-tmin
+  echo "[*] Deduplicating queue (second pass) ..."
+  tmux split-window -hd "afl-cmin -i queue-tmin/ -o queue-final -- $command; touch tmux-continue"
+  waitTmux
+  #ls queue-final
+
+  ##########
+
+  echo "[*] Distributing queues ..."
+  for f in findings/*; do
+    cp -r queue-final "$f/queue"
+    echo "$f/queue"
+    ls "$f/queue"
+  done
+
+  ##########
+
+  echo "[*] Cleaning up ..."
+  # this is easier than deleting all the individual files in the folders
+  rm -r queue-*
+  mkdir queue-all queue-cmin queue-tmin queue-final
+
+}
+
+##########
+
+cecho GREEN "Job title > "
+read job
+
+cecho GREEN "How many cores? > "
+read coresDesired
+
+if [[ ! $coresDesired =~ ^-?[0-9]+$ ]]; then
+  cecho RED "[!] Enter an integer\n"
+  exit 1
+fi
+
+if (( $coresDesired < 1 )); then
+  cecho RED "[!] Enter at least 1\n"
+  exit 1
+fi
+
+cecho GREEN "How many fuzzing cycles? > "
+read cyclesDesired
+
+if [[ ! $cyclesDesired =~ ^-?[0-9]+$ ]]; then
+  cecho RED "[!] Enter an integer\n"
+  exit 1
+fi
+
+if (( $cyclesDesired < 1 )); then
+  cecho RED "[!] Enter at least 1\n"
+  exit 1
+fi
+
+cecho GREEN "Test case source folder > "
+read testcaseDir
+
+if [ ! -d "$testcaseDir" ]; then
+  cecho RED "[!] No such directory\n"
+  exit 1
+fi
+
+cecho GREEN "Target executable > "
+read executable
+
+if [ ! -f $executable ]; then
+  cecho RED "[!] No such file\n"
+  exit 1
+fi
+
+cecho GREEN "Target parameters > "
+read params
+
+cecho GREEN "Additional AFL parameters > "
+read aflparams
+
+command="executable/$executable $params"
+
+##########
+
+echo "[*] Initializing folders"
+
+if [ ! -d "ramdisk" ]; then
+  mkdir ramdisk
+fi
+mkdir backup
+mkdir crashes
+
+##########
+
+echo "[*] Evaluating available cores ..."
+
+coresFree=$(afl-gotcpu 2>&1 | awk -F ' ' '/ cores/{printf $9}')
+coresMax=$(nproc --ignore 1)
+
+if (( $coresFree < $coresMax )); then
+  cores=$coresFree
+else
+  cores=$coresMax
+fi
+
+if (( $cores == 0 )); then
+  cecho RED "[!] No free cores. Terminate some tasks.\n"
+  exit 2
+fi
+
+if (( $coresDesired < $cores )); then
+  cores=$coresDesired
+fi
+
+echo "[*] Got $cores free cores"
+
+##########
+
+echo "[*] Initializing RAM file system"
+
+ramdiskPath=$(realpath ramdisk)
+
+if [[ $UID != 0 ]]; then
+  cecho YELLOW "[!] Using sudo to use \"mount\"\n"
+  sudo mount -t tmpfs -o size=4G tmpfs ramdisk
+else
+  mount -t tmpfs -o size=4G tmpfs ramdisk
+fi
+ramdiskMounted=1
+
+##########
+
+echo "[*] Copying target executable ..."
+mkdir ramdisk/executable
+cp $executable ramdisk/executable/
+
+##########
+
+echo "[*] Populating test cases ..."
+
+cp -r "$testcaseDir" ramdisk/testcases
+mkdir ramdisk/findings ramdisk/queue-all ramdisk/queue-cmin ramdisk/queue-tmin ramdisk/queue-final
+
+##########
+
+echo "[*] Configuring environment ..."
+
+if [[ $UID != 0 ]]; then
+  echo core | sudo tee /proc/sys/kernel/core_pattern
+  echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+else
+  echo core | tee /proc/sys/kernel/core_pattern
+  echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+fi
+
+##########
+
+cecho YELLOW "[+] Beginning first fuzzing cycle\n"
+
+cd ramdisk
+cycle=1
+fuzzOneCycle
+
+##########
+
+if (( $cyclesDesired != 1 )); then
+  for ((cycle=2;cycle<=$cyclesDesired;cycle++)); do
+    cecho YELLOW "[+] Beginning cycle ${cycle}\n"
+    minimizeQueues
+    fuzzOneCycle
+    if (( $abort == 1 )); then
+      break
+    fi
+  done
+fi
+
+##########
+
+cecho YELLOW "[+] Fuzzing done."
+cd ..
+
+##########
+
+echo "[*] Exporting crashes"
+# need find here because wildcards don't work on this many files
+find ramdisk/findings/*/crashes -name "id:*" | xargs -I {} cp -n {} crashes/
+
+##########
+
+exit 0
