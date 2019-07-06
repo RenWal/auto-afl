@@ -7,7 +7,7 @@ This tool automates fuzzing with the [American Fuzzy Lop](http://lcamtuf.coredum
 auto-afl was created for my seminar thesis at the [Chair of Systems Security @ RUB](https://www.syssec.ruhr-uni-bochum.de/).
 
 ## Requirements
-auto-afl was built for AFL version 2.52b. You need the binaries `afl-fuzz`, `afl-cmin` and `afl-ptmin` on your $PATH, as well as `screen` and `tmux`.
+auto-afl was built for AFL version 2.52b. You need the binaries `afl-fuzz` and `afl-cmin` from AFL on your $PATH, as well as `screen` and `tmux`.
 
 Please also put the script from the submodule `afl-ptmin` on your $PATH.
 
