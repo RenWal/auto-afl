@@ -9,6 +9,8 @@ auto-afl was created for my seminar thesis at the [Chair of Systems Security @ R
 ## Requirements
 auto-afl was built for AFL version 2.52b. You need the binaries `afl-fuzz`, `afl-cmin` and `afl-ptmin` on your $PATH, as well as `screen` and `tmux`.
 
+Please also put the script from the submodule `afl-ptmin` on your $PATH.
+
 ## Quick Start
 To use auto-afl:
   1. Create any directory
