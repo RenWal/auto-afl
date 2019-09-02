@@ -69,6 +69,7 @@ fuzzOneCycle() {
   if (( $cycle == 1 )); then
     inputdir=testcases
   else
+    # magic value to enable resume mode in afl-fuzz
     inputdir=-
   fi
   
@@ -149,15 +150,15 @@ minimizeQueues() {
   ##########
 
   echo "[*] Deduplicating queue (first pass) ..."
-  tmux split-window -hd "afl-cmin -i queue-all/ -o queue-cmin -- $command; touch tmux-continue"
+  tmux split-window -hd "afl-cmin -i queue-all/ -o queue-cmin $cminparams -- $command; touch tmux-continue"
   waitTmux
   #ls queue-cmin
   echo "[*] Minimizing test cases ..."
-  tmux split-window -hd "afl-ptmin $cores queue-cmin queue-tmin \"$command\"; touch tmux-continue"
+  tmux split-window -hd "afl-ptmin $cores queue-cmin queue-tmin \"$command\" $tminparams; touch tmux-continue"
   waitTmux
   #ls queue-tmin
   echo "[*] Deduplicating queue (second pass) ..."
-  tmux split-window -hd "afl-cmin -i queue-tmin/ -o queue-final -- $command; touch tmux-continue"
+  tmux split-window -hd "afl-cmin -i queue-tmin/ -o queue-final $cminparams -- $command; touch tmux-continue"
   waitTmux
   #ls queue-final
 
@@ -229,8 +230,14 @@ fi
 cecho GREEN "Target parameters > "
 read params
 
-cecho GREEN "Additional AFL parameters > "
+cecho GREEN "Additional AFL fuzzer (afl-fuzz) parameters > "
 read aflparams
+
+cecho GREEN "Additional AFL test minimizer (afl-tmin) parameters > "
+read tminparams
+
+cecho GREEN "Additional AFL corpus minimizer (afl-cmin) parameters > "
+read cminparams
 
 command="executable/$executable $params"
 

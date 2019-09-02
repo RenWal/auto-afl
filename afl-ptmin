@@ -6,6 +6,7 @@ cores=$1
 inputdir=$2
 outputdir=$3
 command=$4
+params=${@:5}
 pids=""
 total=`ls $inputdir | wc -l`
 
@@ -14,7 +15,7 @@ do
 	for i in `seq 0 $(expr $cores - 1)`
 	do
 		file=`ls -Sr $inputdir | sed $(expr $i + $k)"q;d"`
-		afl-tmin -i $inputdir/$file -o $outputdir/$file -- $4 &
+		afl-tmin -i $inputdir/$file -o $outputdir/$file $params -- $4 &
 	done
 
 	wait
