@@ -51,7 +51,6 @@ finish() {
   fi
   echo "Press [Enter] to return to your shell"
 }
-trap finish EXIT INT
 
 ##########
 
@@ -235,6 +234,9 @@ read aflparams
 
 command="executable/$executable $params"
 
+# from here we'll need to clean up properly
+trap finish EXIT INT
+
 ##########
 
 echo "[*] Initializing folders"
@@ -320,12 +322,12 @@ fuzzOneCycle
 
 if (( $cyclesDesired != 1 )); then
   for ((cycle=2;cycle<=$cyclesDesired;cycle++)); do
-    cecho YELLOW "[+] Beginning cycle ${cycle}\n"
-    minimizeQueues
-    fuzzOneCycle
     if (( $abort == 1 )); then
       break
     fi
+    cecho YELLOW "[+] Beginning cycle ${cycle}\n"
+    minimizeQueues
+    fuzzOneCycle
   done
 fi
 
