@@ -7,9 +7,9 @@ This tool automates fuzzing with the [American Fuzzy Lop](http://lcamtuf.coredum
 auto-afl was created for my seminar thesis at the [Chair of Systems Security @ RUB](https://www.syssec.ruhr-uni-bochum.de/).
 
 ## Requirements
-auto-afl was built for AFL version 2.52b. You need the binaries `afl-fuzz` and `afl-cmin` from AFL on your $PATH, as well as `screen` and `tmux`.
+auto-afl was built for AFL version 2.52b. You need the binaries `afl-fuzz`, `afl-tmin` and `afl-cmin` from AFL on your $PATH, as well as `screen` and `tmux`.
 
-Please also put the script from the submodule `afl-ptmin` on your $PATH.
+Please also put the script `afl-ptmin` on your $PATH. (This version of `afl-ptmin` is modified from [brandonprry's gist](https://gist.github.com/brandonprry/4305328f069f7a951ccc/3717cb1d04c715b9ae1e1edf1662bae138adda91).)
 
 ## Quick Start
 To use auto-afl:
@@ -28,7 +28,7 @@ auto-afl will spawn a tmux session for you or use an existing one. You will then
   4. The name of the directory with your test cases
   5. The name of the target
   6. Any parameters to invoke your target with (Use `@@` as a placeholder for the input file name. If you do not, then the file content will be sent to the target's standard input)
-  7. Any parameters for AFL (memory limits, etc.)
+  7. Any parameters for AFL (memory limits, etc.). There are separate entries for afl-fuzz, afl-tmin and afl-cmin as they each take slightly different arguments. Please see the AFL documentation for what to use where.
 
 Hit enter one more time, then auto-afl will start the fuzzing run.
 
