@@ -239,7 +239,8 @@ read tminparams
 cecho GREEN "Additional AFL corpus minimizer (afl-cmin) parameters > "
 read cminparams
 
-command="executable/$executable $params"
+binBasename=$(basename $executable)
+command="executable/$binBasename $params"
 
 # from here we'll need to clean up properly
 trap finish EXIT INT
